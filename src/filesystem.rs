@@ -14,17 +14,87 @@ use time::Timespec;
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
 
+pub struct Inode {
+    ino: u64,
+    truepath: PathBuf,
+    attributes: FileAttr
+}
+
+impl Inode {
+    fn reify(ino: u64, truepath: &Path) -> Self {
+        println!("truepath {:?}", truepath);
+        let source_file = File::open(truepath).unwrap();
+        let source_metadata = source_file.metadata().unwrap();
+        let source_attributes = FileAttr {
+            ino: source_metadata.ino(),
+            size: source_metadata.size() as u64,
+            blocks: source_metadata.blocks() as u64,
+            atime: Timespec::new(source_metadata.atime(), 0),
+            mtime: Timespec::new(source_metadata.mtime(), 0),
+            ctime: Timespec::new(source_metadata.ctime(), 0),
+            crtime: Timespec::new(0, 0), // no servitude to Cupertino
+            kind: FileType::RegularFile,
+            perm: source_metadata.permissions().mode() as u16,
+            nlink: source_metadata.nlink() as u32,
+            uid: source_metadata.uid(),
+            gid: source_metadata.gid(),
+            rdev: source_metadata.rdev() as u32,
+            flags: 0, // no servitude to Cupertino
+        };
+        Inode { ino: ino,
+                truepath: truepath.to_path_buf(),
+                attributes: source_attributes }
+    }
+}
+
+
 pub struct MarkdownFs {
-    source_directory: PathBuf
+    source_directory: PathBuf,
+    inodes: Vec<Inode>
 }
 
 
 impl MarkdownFs {
-    pub fn new(path: &Path) -> Self {
-        // TODO: verify that it's actually a directory
-        MarkdownFs { source_directory: path.to_path_buf() }
+    pub fn new(source_directory: &Path) -> Self {
+        // TODO: verify that path is actually a directory
+        let root_metadata = fs::metadata(source_directory).unwrap();
+        let root_attributes = FileAttr {
+            ino: 1,
+            size: root_metadata.size() as u64,
+            blocks: root_metadata.blocks() as u64,
+            atime: Timespec::new(root_metadata.atime(), 0),
+            mtime: Timespec::new(root_metadata.mtime(), 0),
+            ctime: Timespec::new(root_metadata.ctime(), 0),
+            crtime: Timespec::new(0, 0), // no servitude to Cupertino
+            kind: FileType::Directory,
+            perm: root_metadata.permissions().mode() as u16,
+            nlink: root_metadata.nlink() as u32,
+            uid: root_metadata.uid(),
+            gid: root_metadata.gid(),
+            rdev: root_metadata.rdev() as u32,
+            flags: 0, // no servitude to Cupertino
+        };
+        let root_node = Inode {
+            ino: 1,
+            truepath: source_directory.to_path_buf(),
+            attributes: root_attributes
+        };
+        MarkdownFs { source_directory: source_directory.to_path_buf(),
+                     inodes: vec![root_node] }
+    }
+
+    pub fn assimilate(&mut self, truepath: &Path) -> u64 {
+        let new_ino = (self.inodes.len() + 1) as u64;
+        self.inodes.push(Inode::reify(new_ino, truepath));
+        self.inodes.len() as u64
+    }
+
+    pub fn inode(&self, ino: u64) -> Option<&Inode> {
+        let index = (ino - 1) as usize;
+        self.inodes.get(index)
     }
 }
+
 
 impl Filesystem for MarkdownFs {
 
@@ -37,25 +107,8 @@ impl Filesystem for MarkdownFs {
             // TODO: also verify .md extension?
             .find(|source_path| name == source_path) {
                 Some(source_path) => {
-                    let source_file = File::open(source_path).unwrap();
-                    let source_metadata = source_file.metadata().unwrap();
-                    let source_attributes = FileAttr {
-                        ino: source_metadata.ino(),
-                        size: source_metadata.size() as u64,
-                        blocks: source_metadata.blocks() as u64,
-                        atime: Timespec::new(source_metadata.atime(), 0),
-                        mtime: Timespec::new(source_metadata.mtime(), 0),
-                        ctime: Timespec::new(source_metadata.ctime(), 0),
-                        crtime: Timespec::new(0, 0), // no servitude to Cupertino
-                        kind: FileType::RegularFile,
-                        perm: source_metadata.permissions().mode() as u16,
-                        nlink: source_metadata.nlink() as u32,
-                        uid: source_metadata.uid(),
-                        gid: source_metadata.gid(),
-                        rdev: source_metadata.rdev() as u32,
-                        flags: 0, // no servitude to Cupertino
-                    };
-                    reply.entry(&TTL, &source_attributes, 0);
+                    let ino = self.assimilate(&source_path);
+                    reply.entry(&TTL, &self.inode(ino).unwrap().attributes, 0);
                 },
                 None => {
                     reply.error(ENOENT);
@@ -64,29 +117,12 @@ impl Filesystem for MarkdownFs {
     }
 
     fn getattr(&mut self, _request: &Request, ino: u64, reply: ReplyAttr) {
-        match ino {
-            1 => {
-                let root_metadata = fs::metadata(&self.source_directory)
-                    .unwrap();
-                let root_attributes = FileAttr {
-                    ino: 1,
-                    size: root_metadata.size() as u64,
-                    blocks: root_metadata.blocks() as u64,
-                    atime: Timespec::new(root_metadata.atime(), 0),
-                    mtime: Timespec::new(root_metadata.mtime(), 0),
-                    ctime: Timespec::new(root_metadata.ctime(), 0),
-                    crtime: Timespec::new(0, 0), // no servitude to Cupertino
-                    kind: FileType::Directory,
-                    perm: root_metadata.permissions().mode() as u16,
-                    nlink: root_metadata.nlink() as u32,
-                    uid: root_metadata.uid(),
-                    gid: root_metadata.gid(),
-                    rdev: root_metadata.rdev() as u32,
-                    flags: 0, // no servitude to Cupertino
-                };
-                reply.attr(&TTL, &root_attributes);
+        info!("getattr {:?}", ino);
+        match self.inode(ino) {
+            Some(inode) => {
+                reply.attr(&TTL, &inode.attributes)
             },
-            _ => {
+            None => {
                 reply.error(ENOENT);
             }
         }
@@ -94,6 +130,7 @@ impl Filesystem for MarkdownFs {
 
     fn readdir(&mut self, _request: &Request,
                ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
+        info!("readdir {:?}", ino);
         if ino == 1 {
             if offset == 0 {
                 reply.add(1, 0, FileType::Directory, ".");
