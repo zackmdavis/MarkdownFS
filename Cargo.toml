@@ -1,0 +1,8 @@
+[package]
+name = "markdownfs"
+version = "0.0.1"
+authors = ["Zack M. Davis <code@zackmdavis.net>"]
+
+[dependencies]
+markdown = "0.1"
+fuse = "0.2"
