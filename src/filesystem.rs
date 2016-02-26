@@ -4,7 +4,8 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 
-use fuse::{FileAttr, Filesystem, FileType, Request, ReplyDirectory, ReplyEntry};
+use fuse::{FileAttr, Filesystem, FileType, Request,
+           ReplyAttr, ReplyDirectory, ReplyEntry};
 use libc::ENOENT;
 use time::Timespec;
 
@@ -62,6 +63,35 @@ impl Filesystem for MarkdownFs {
             }
     }
 
+    fn getattr(&mut self, _request: &Request, ino: u64, reply: ReplyAttr) {
+        match ino {
+            1 => {
+                let root_metadata = fs::metadata(&self.source_directory)
+                    .unwrap();
+                let root_attributes = FileAttr {
+                    ino: 1,
+                    size: root_metadata.size() as u64,
+                    blocks: root_metadata.blocks() as u64,
+                    atime: Timespec::new(root_metadata.atime(), 0),
+                    mtime: Timespec::new(root_metadata.mtime(), 0),
+                    ctime: Timespec::new(root_metadata.ctime(), 0),
+                    crtime: Timespec::new(0, 0), // no servitude to Cupertino
+                    kind: FileType::Directory,
+                    perm: root_metadata.permissions().mode() as u16,
+                    nlink: root_metadata.nlink() as u32,
+                    uid: root_metadata.uid(),
+                    gid: root_metadata.gid(),
+                    rdev: root_metadata.rdev() as u32,
+                    flags: 0, // no servitude to Cupertino
+                };
+                reply.attr(&TTL, &root_attributes);
+            },
+            _ => {
+                reply.error(ENOENT);
+            }
+        }
+    }
+
     fn readdir(&mut self, _request: &Request,
                ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
         if ino == 1 {
@@ -69,12 +99,14 @@ impl Filesystem for MarkdownFs {
                 reply.add(1, 0, FileType::Directory, ".");
                 reply.add(1, 1, FileType::Directory, "..");
                 let sources = fs::read_dir(&self.source_directory).unwrap();
+
                 let listitems = sources
                     .map(|entry_result| {
-                        entry_result.unwrap().path().to_str().unwrap().to_owned()
+                        entry_result.unwrap().path().file_name().unwrap()
+                            .to_str().unwrap().to_owned()
                     });
                 for (i, listitem) in (2..).zip(listitems) {
-                    reply.add(2, // XXX need real inode numbers probably
+                    reply.add(i, // XXX need real inode numbers probably
                               i,
                               FileType::RegularFile,
                               listitem);
