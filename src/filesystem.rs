@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 
-use fuse::{FileAttr, Filesystem, FileType, Request, ReplyEntry};
+use fuse::{FileAttr, Filesystem, FileType, Request, ReplyDirectory, ReplyEntry};
 use libc::ENOENT;
 use time::Timespec;
 
@@ -60,6 +60,30 @@ impl Filesystem for MarkdownFs {
                     reply.error(ENOENT);
                 }
             }
+    }
+
+    fn readdir(&mut self, _request: &Request,
+               ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
+        if ino == 1 {
+            if offset == 0 {
+                reply.add(1, 0, FileType::Directory, ".");
+                reply.add(1, 1, FileType::Directory, "..");
+                let sources = fs::read_dir(&self.source_directory).unwrap();
+                let listitems = sources
+                    .map(|entry_result| {
+                        entry_result.unwrap().path().to_str().unwrap().to_owned()
+                    });
+                for (i, listitem) in (2..).zip(listitems) {
+                    reply.add(2, // XXX need real inode numbers probably
+                              i,
+                              FileType::RegularFile,
+                              listitem);
+                }
+            }
+            reply.ok();
+        } else {
+            reply.error(ENOENT);
+        }
     }
 
 }
