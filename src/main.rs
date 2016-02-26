@@ -9,6 +9,7 @@ mod filesystem;
 
 
 use std::env;
+use std::path::Path;
 
 use log::LogLevelFilter;
 
@@ -25,5 +26,8 @@ fn main() {
         Box::new(MarkdownFsLogger)
     }).expect("couldn't initialize logging?!");
 
-    fuse::mount(MarkdownFs, &mountpoint, &[]);
+    fuse::mount(
+        MarkdownFs::new(
+            Path::new(&source_directory.into_string().unwrap())),
+        &mountpoint, &[]);
 }
