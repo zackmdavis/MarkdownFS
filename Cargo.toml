@@ -4,7 +4,7 @@ version = "0.0.1"
 authors = ["Zack M. Davis <code@zackmdavis.net>"]
 
 [dependencies]
-fuse = "0.2"
+fuse = { git = "https://github.com/zackmdavis/rust-fuse.git", branch = "debug_trait" }
 libc = "0.2"
 log = "0.3"
 markdown = "0.1"

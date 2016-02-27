@@ -22,7 +22,6 @@ pub struct Inode {
 
 impl Inode {
     fn reify(ino: u64, truepath: &Path) -> Self {
-        println!("truepath {:?}", truepath);
         let source_file = File::open(truepath).unwrap();
         let source_metadata = source_file.metadata().unwrap();
         let source_attributes = FileAttr {
@@ -98,9 +97,9 @@ impl MarkdownFs {
 
 impl Filesystem for MarkdownFs {
 
-    fn lookup(&mut self, _request: &Request,
+    fn lookup(&mut self, request: &Request,
               _parent: u64, name: &Path, reply: ReplyEntry) {
-        info!("lookup {:?}", name);
+        info!("lookup request: {:?}; name: {:?}", request, name);
         let sources = fs::read_dir(&self.source_directory).unwrap();
         match sources
             .map(|entry_result| { entry_result.unwrap().path() })
@@ -118,8 +117,8 @@ impl Filesystem for MarkdownFs {
             }
     }
 
-    fn getattr(&mut self, _request: &Request, ino: u64, reply: ReplyAttr) {
-        info!("getattr {:?}", ino);
+    fn getattr(&mut self, request: &Request, ino: u64, reply: ReplyAttr) {
+        info!("getattr request: {:?}; ino: {:?}", request, ino);
         match self.inode(ino) {
             Some(inode) => {
                 reply.attr(&TTL, &inode.attributes)
@@ -130,9 +129,9 @@ impl Filesystem for MarkdownFs {
         }
     }
 
-    fn readdir(&mut self, _request: &Request,
+    fn readdir(&mut self, request: &Request,
                ino: u64, _fh: u64, offset: u64, mut reply: ReplyDirectory) {
-        info!("readdir {:?}", ino);
+        info!("readdir request: {:?}; ino: {:?}", request, ino);
         if ino == 1 {
             if offset == 0 {
                 reply.add(1, 0, FileType::Directory, ".");
