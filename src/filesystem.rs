@@ -5,7 +5,7 @@ use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
 
 use fuse::{FileAttr, Filesystem, FileType, Request,
-           ReplyAttr, ReplyDirectory, ReplyEntry};
+           ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
 use libc::ENOENT;
 use time::Timespec;
 
@@ -13,7 +13,7 @@ use time::Timespec;
 // XXX CARGO CULT (no pun intended): what is a TTL in this context??
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
-
+#[derive(Debug)]
 pub struct Inode {
     ino: u64,
     truepath: PathBuf,
@@ -22,6 +22,7 @@ pub struct Inode {
 
 impl Inode {
     fn reify(ino: u64, truepath: &Path) -> Self {
+        info!("reifying inode {} for truepath {:?}", ino, truepath);
         let source_file = File::open(truepath).unwrap();
         let source_metadata = source_file.metadata().unwrap();
         let source_attributes = FileAttr {
@@ -47,6 +48,7 @@ impl Inode {
 }
 
 
+#[derive(Debug)]
 pub struct MarkdownFs {
     source_directory: PathBuf,
     inodes: Vec<Inode>
@@ -83,12 +85,14 @@ impl MarkdownFs {
     }
 
     pub fn assimilate(&mut self, truepath: &Path) -> u64 {
+        info!("assimilating {:?} as inode", truepath);
         let new_ino = (self.inodes.len() + 1) as u64;
         self.inodes.push(Inode::reify(new_ino, truepath));
         self.inodes.len() as u64
     }
 
     pub fn inode(&self, ino: u64) -> Option<&Inode> {
+        info!("fetching inode {:?} of {:?}", ino, self.inodes.len());
         let index = (ino - 1) as usize;
         self.inodes.get(index)
     }
@@ -127,6 +131,12 @@ impl Filesystem for MarkdownFs {
                 reply.error(ENOENT);
             }
         }
+    }
+
+    fn read(&mut self, request: &Request, ino: u64,
+            fh: u64, offset: u64, size: u32, reply: ReplyData) {
+        info!("read request: {:?}; ino: {:?}; fh: {:?}", request, ino, fh);
+
     }
 
     fn readdir(&mut self, request: &Request,
