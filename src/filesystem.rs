@@ -105,7 +105,9 @@ impl Filesystem for MarkdownFs {
         match sources
             .map(|entry_result| { entry_result.unwrap().path() })
             // TODO: also verify .md extension?
-            .find(|source_path| name == source_path) {
+            .find(|source_path| {
+                name.as_os_str() == source_path.file_name().unwrap()
+            }) {
                 Some(source_path) => {
                     let ino = self.assimilate(&source_path);
                     reply.entry(&TTL, &self.inode(ino).unwrap().attributes, 0);
