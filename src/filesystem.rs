@@ -1,12 +1,13 @@
 use std::fs;
 use std::fs::File;
-use std::path::{Path, PathBuf};
+use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
+use std::path::{Path, PathBuf};
 
 use fuse::{FileAttr, Filesystem, FileType, Request,
            ReplyAttr, ReplyData, ReplyDirectory, ReplyEntry};
-use libc::ENOENT;
+use libc::{EIO, ENOENT};
 use time::Timespec;
 
 
@@ -26,7 +27,7 @@ impl Inode {
         let source_file = File::open(truepath).unwrap();
         let source_metadata = source_file.metadata().unwrap();
         let source_attributes = FileAttr {
-            ino: source_metadata.ino(),
+            ino: ino,
             size: source_metadata.size() as u64,
             blocks: source_metadata.blocks() as u64,
             atime: Timespec::new(source_metadata.atime(), 0),
@@ -136,7 +137,27 @@ impl Filesystem for MarkdownFs {
     fn read(&mut self, request: &Request, ino: u64,
             fh: u64, offset: u64, size: u32, reply: ReplyData) {
         info!("read request: {:?}; ino: {:?}; fh: {:?}", request, ino, fh);
-
+        match self.inodes.get(ino as usize) {
+            Some(inode) => {
+                match File::open(&inode.truepath) {
+                    Ok(mut backing_file) => {
+                        let mut buffer = Vec::with_capacity(size as usize);
+                        backing_file.read_to_end(&mut buffer)
+                            .expect("couldn't read backing file?!");
+                        reply.data(&buffer[offset as usize..]);
+                    },
+                    Err(error) => {
+                        info!("error reading file {:?}: {:?}",
+                              &inode.truepath, error);
+                        reply.error(EIO);
+                    }
+                }
+            },
+            None => {
+                info!("couldn't find inode {:?} to read", ino);
+                reply.error(EIO);
+            }
+        }
     }
 
     fn readdir(&mut self, request: &Request,
