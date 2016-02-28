@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::fs::File;
+use std::io;
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::fs::PermissionsExt;
@@ -16,17 +17,21 @@ use time::Timespec;
 const TTL: Timespec = Timespec { sec: 1, nsec: 0 };
 
 
-fn hoist_attributes(ino: u64, backing_path: &Path) -> FileAttr {
+fn hoist_attributes(ino: u64, backing_path: &Path)
+                    -> Result<FileAttr, io::Error> {
     info!("hoisting attributes for {:?} as ino {}", backing_path, ino);
-    let source_file = File::open(backing_path).unwrap();
+    let source_file = try!(File::open(backing_path));
     let kind = if backing_path.is_dir() {
         FileType::RegularFile
     } else if backing_path.is_file() {
         FileType::Directory
     } else {
-        panic!("path {:?} is not to a directory or regular file", backing_path);
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!("path {:?} is not to a directory or regular file",
+                    backing_path)));
     };
-    let source_metadata = source_file.metadata().unwrap();
+    let source_metadata = try!(source_file.metadata());
     let source_attributes = FileAttr {
         ino: ino,
         size: source_metadata.size() as u64,
@@ -43,7 +48,7 @@ fn hoist_attributes(ino: u64, backing_path: &Path) -> FileAttr {
         rdev: source_metadata.rdev() as u32,
         flags: 0, // no servitude to Cupertino
     };
-    source_attributes
+    Ok(source_attributes)
 }
 
 
@@ -123,14 +128,21 @@ impl Filesystem for MarkdownFs {
                 our_ino
             }
         };
-        reply.entry(&TTL, &hoist_attributes(ino, &full_path), 0);
+        match hoist_attributes(ino, &full_path) {
+            Ok(attrs) => {
+                reply.entry(&TTL, &attrs, 0);
+            },
+            Err(_) => {
+                reply.error(ENOENT);
+            }
+        }
     }
 
     fn getattr(&mut self, request: &Request, ino: u64, reply: ReplyAttr) {
         info!("getattr request: {:?}; ino: {:?}", request, ino);
         match self.backing_path(ino) {
             Some(path) => {
-                reply.attr(&TTL, &hoist_attributes(ino, path));
+                reply.attr(&TTL, &hoist_attributes(ino, path).unwrap());
             },
             None => {
                 reply.error(ENOENT);
